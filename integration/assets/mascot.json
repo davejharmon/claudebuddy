@@ -1,0 +1,73 @@
+{
+  "$comment": "claudebuddy mascot — original pixel character, swappable. 16x16 grid. Apply 'shade' to every face, then overlay the per-state 'faces' entry. Characters map to 'palette'. '.' = transparent.",
+  "size": 16,
+  "scale_hint": { "device_px": 6, "html_px": 7 },
+  "palette": {
+    ".": null,
+    "K": "#2b2722",
+    "C": "#d97757",
+    "L": "#ecb087",
+    "D": "#b5532f",
+    "W": "#f6efe0",
+    "P": "#2b2722",
+    "R": "#cf6a49"
+  },
+  "body": [
+    "................",
+    "......KKKK......",
+    "....KKCCCCKK....",
+    "...KCCCCCCCCK...",
+    "..KCCCCCCCCCCK..",
+    "..KCCCCCCCCCCK..",
+    ".KCCCCCCCCCCCCK.",
+    ".KCCCCCCCCCCCCK.",
+    ".KCCCCCCCCCCCCK.",
+    ".KCCCCCCCCCCCCK.",
+    "..KCCCCCCCCCCK..",
+    "..KCCCCCCCCCCK..",
+    "...KCCCCCCCCK...",
+    "....KKCCCCKK....",
+    "......KKKK......",
+    "................"
+  ],
+  "shade": [
+    [3,4,"L"],[3,5,"L"],[4,3,"L"],[4,4,"L"],[5,3,"L"],
+    [9,12,"D"],[9,13,"D"],[10,11,"D"],[10,12,"D"],[11,11,"D"]
+  ],
+  "faces": {
+    "idle": {
+      "$": "content, calm — connected and waiting",
+      "cells": [
+        [6,4,"W"],[6,5,"W"],[7,4,"W"],[7,5,"P"],
+        [6,10,"W"],[6,11,"W"],[7,10,"P"],[7,11,"W"],
+        [10,7,"K"],[10,8,"K"]
+      ]
+    },
+    "working": {
+      "$": "perked up, little open mouth — spending tokens. Add 3 coral sparkles.",
+      "cells": [
+        [6,4,"W"],[6,5,"W"],[7,4,"P"],[7,5,"W"],
+        [6,10,"W"],[6,11,"W"],[7,10,"W"],[7,11,"P"],
+        [10,7,"K"],[10,8,"K"],[11,7,"W"],[11,8,"W"]
+      ],
+      "deco": "sparkles"
+    },
+    "maxed": {
+      "$": "strained eyes + blush + flat mouth — budget spent. Add a sweat drop.",
+      "cells": [
+        [6,4,"K"],[7,5,"K"],[6,11,"K"],[7,10,"K"],
+        [8,3,"R"],[8,12,"R"],
+        [10,6,"K"],[10,7,"K"],[10,8,"K"],[10,9,"K"]
+      ],
+      "deco": "sweat_drop"
+    },
+    "offline": {
+      "$": "closed eyes, dozing — no MQTT link. Render dim. Add rising 'z z z'.",
+      "cells": [
+        [7,4,"K"],[7,5,"K"],[7,10,"K"],[7,11,"K"],
+        [10,7,"K"],[10,8,"K"]
+      ],
+      "deco": "zzz"
+    }
+  }
+}

@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>claudebuddy — screen export</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  /* Renders ONE 320x240 screen, no bezel, for pixel-exact PNG export.
+     Pick a state with the URL hash: #0 offline, #1 maxed, #2 working, #3 idle. */
+  :root{
+    --ink:#2b2722;--ink-soft:#5a5249;--lcd:#e9e1cf;--lcd-2:#e3dac6;
+    --coral:#d97757;--coral-lite:#e9a883;--clay:#b5532f;--alert:#c0492b;
+    --ghost:rgba(43,39,34,.10);
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;background:#000;}
+  .screen{position:relative;width:320px;height:240px;overflow:hidden;
+    background:radial-gradient(130% 120% at 30% 0%, var(--lcd) 0%, var(--lcd-2) 100%);
+    font-family:"Silkscreen",monospace;color:var(--ink);}
+  .screen::before{content:"";position:absolute;inset:0;pointer-events:none;z-index:6;
+    background-image:radial-gradient(rgba(43,39,34,.05) 0.9px, transparent 1px);background-size:3px 3px;}
+  .screen .stack{position:absolute;inset:0;z-index:4;display:flex;flex-direction:column;}
+  .hdr{height:18px;flex:0 0 18px;display:flex;align-items:center;justify-content:space-between;
+    padding:0 8px;border-bottom:1px dashed rgba(43,39,34,.16);}
+  .hdr .id{font-size:8px;letter-spacing:.5px;} .hdr .id .s{color:var(--coral);}
+  .hdr .conn{display:flex;align-items:center;gap:5px;font-size:8px;color:var(--ink-soft);}
+  .hdr .dot{width:7px;height:7px;border-radius:50%;}
+  .hdr .dot.on{background:var(--coral);box-shadow:0 0 5px rgba(217,119,87,.8);}
+  .hdr .dot.off{background:transparent;border:1.5px solid rgba(43,39,34,.4);}
+  .content{flex:0 0 160px;display:flex;align-items:center;gap:8px;padding:0 12px;}
+  .mascot-wrap{position:relative;flex:0 0 112px;height:112px;}
+  .mascot{display:grid;grid-template-columns:repeat(16,7px);grid-auto-rows:7px;line-height:0;}
+  .mascot .px{width:7px;height:7px;}
+  .status{flex:1;min-width:0;display:flex;flex-direction:column;gap:7px;}
+  .status .kicker{font-size:8px;letter-spacing:.6px;color:var(--ink-soft);margin-bottom:-2px;}
+  .status .big{font-size:17px;font-weight:700;letter-spacing:.5px;line-height:1;}
+  .status .big.time{letter-spacing:1px;text-shadow:0 0 6px rgba(192,73,43,.25);}
+  .status .sub{font-size:8px;line-height:1.5;color:var(--ink-soft);letter-spacing:.3px;}
+  .status .sub.accent{color:var(--clay);} .status .sub .hl{color:var(--ink);}
+  .deco{position:absolute;inset:0;pointer-events:none;}
+  .deco .z{position:absolute;font-size:8px;color:rgba(43,39,34,.45);}
+  .deco .spark{position:absolute;width:5px;height:5px;background:var(--coral);box-shadow:0 0 5px rgba(217,119,87,.7);}
+  .deco .drop{position:absolute;width:5px;height:7px;border-radius:0 0 50% 50%/0 0 60% 60%;
+    background:var(--lcd);border:1.5px solid var(--ink);border-top:none;}
+  .ftr{flex:0 0 62px;display:flex;flex-direction:column;justify-content:center;gap:9px;
+    padding:0 12px;border-top:1px dashed rgba(43,39,34,.16);}
+  .bar-row{display:flex;align-items:center;gap:8px;}
+  .bar-row .lbl{font-size:8px;width:22px;letter-spacing:.5px;color:var(--ink-soft);}
+  .bar{flex:1;display:flex;gap:2px;height:10px;}
+  .bar .seg{flex:1;background:var(--ghost);}
+  .bar .seg.f{background:var(--coral);} .bar .seg.f.alert{background:var(--alert);}
+  .bar .seg.lead{background:var(--coral-lite);}
+  .bar-row .val{font-size:8px;width:30px;text-align:right;letter-spacing:.3px;}
+  .bar-row .val.alert{color:var(--alert);}
+  .screen.off .stack{opacity:.52;filter:grayscale(.35);}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+const PALETTE={'.':null,K:'#2b2722',C:'#d97757',L:'#ecb087',D:'#b5532f',W:'#f6efe0',P:'#2b2722',R:'#cf6a49'};
+const BODY=["................","......KKKK......","....KKCCCCKK....","...KCCCCCCCCK...",
+"..KCCCCCCCCCCK..","..KCCCCCCCCCCK..",".KCCCCCCCCCCCCK.",".KCCCCCCCCCCCCK.",
+".KCCCCCCCCCCCCK.",".KCCCCCCCCCCCCK.","..KCCCCCCCCCCK..","..KCCCCCCCCCCK..",
+"...KCCCCCCCCK...","....KKCCCCKK....","......KKKK......","................"];
+const SHADE=[[3,4,'L'],[3,5,'L'],[4,3,'L'],[4,4,'L'],[5,3,'L'],[9,12,'D'],[9,13,'D'],[10,11,'D'],[10,12,'D'],[11,11,'D']];
+const FACES={
+  idle:[[6,4,'W'],[6,5,'W'],[7,4,'W'],[7,5,'P'],[6,10,'W'],[6,11,'W'],[7,10,'P'],[7,11,'W'],[10,7,'K'],[10,8,'K']],
+  working:[[6,4,'W'],[6,5,'W'],[7,4,'P'],[7,5,'W'],[6,10,'W'],[6,11,'W'],[7,10,'W'],[7,11,'P'],[10,7,'K'],[10,8,'K'],[11,7,'W'],[11,8,'W']],
+  maxed:[[6,4,'K'],[7,5,'K'],[6,11,'K'],[7,10,'K'],[8,3,'R'],[8,12,'R'],[10,6,'K'],[10,7,'K'],[10,8,'K'],[10,9,'K']],
+  offline:[[7,4,'K'],[7,5,'K'],[7,10,'K'],[7,11,'K'],[10,7,'K'],[10,8,'K']]
+};
+function buildMascot(face){const g=BODY.map(r=>r.split(''));[...SHADE,...FACES[face]].forEach(([r,c,ch])=>g[r][c]=ch);
+  const el=document.createElement('div');el.className='mascot';
+  g.forEach(row=>row.forEach(ch=>{const px=document.createElement('div');px.className='px';const col=PALETTE[ch];if(col)px.style.background=col;el.appendChild(px);}));return el;}
+function buildDeco(s){const d=document.createElement('div');d.className='deco';
+  if(s.face==='working'){[[92,8],[6,30],[84,62]].forEach(([x,y],i)=>{const sp=document.createElement('div');sp.className='spark';sp.style.left=x+'px';sp.style.top=y+'px';if(i===1){sp.style.width='3px';sp.style.height='3px';}d.appendChild(sp);});}
+  if(s.face==='maxed'){const dr=document.createElement('div');dr.className='drop';dr.style.left='88px';dr.style.top='40px';d.appendChild(dr);}
+  if(s.face==='offline'){[[86,30,7],[96,18,9],[107,4,11]].forEach(([x,y,sz])=>{const z=document.createElement('div');z.className='z';z.textContent='z';z.style.left=x+'px';z.style.top=y+'px';z.style.fontSize=sz+'px';d.appendChild(z);});}
+  return d;}
+function buildBar(label,pct,alert,off){const row=document.createElement('div');row.className='bar-row';
+  const l=document.createElement('div');l.className='lbl';l.textContent=label;
+  const bar=document.createElement('div');bar.className='bar';const N=12,f=off?0:Math.round(pct/100*N);
+  for(let i=0;i<N;i++){const seg=document.createElement('div');seg.className='seg';if(i<f){seg.classList.add('f');if(alert)seg.classList.add('alert');if(!alert&&i===f-1)seg.classList.add('lead');}bar.appendChild(seg);}
+  const v=document.createElement('div');v.className='val'+(alert?' alert':'');v.textContent=off?'--':pct+'%';
+  row.append(l,bar,v);return row;}
+function buildScreen(s){const screen=document.createElement('div');screen.className='screen'+(s.offline?' off':'');
+  const stack=document.createElement('div');stack.className='stack';
+  const hdr=document.createElement('div');hdr.className='hdr';
+  hdr.innerHTML=`<div class="id"><span class="s">/</span>claudebuddy</div>`;
+  const conn=document.createElement('div');conn.className='conn';
+  conn.innerHTML=`<span>${s.connected?'live':'no link'}</span><span class="dot ${s.connected?'on':'off'}"></span>`;hdr.appendChild(conn);
+  const content=document.createElement('div');content.className='content';
+  const mw=document.createElement('div');mw.className='mascot-wrap';mw.appendChild(buildMascot(s.face));mw.appendChild(buildDeco(s));
+  const status=document.createElement('div');status.className='status';
+  if(s.kicker){const k=document.createElement('div');k.className='kicker';k.textContent=s.kicker;status.appendChild(k);}
+  const big=document.createElement('div');big.className='big'+(s.bigTime?' time':'');big.textContent=s.big;
+  if(s.bigColor)big.style.color=s.bigColor;if(s.bigSize)big.style.fontSize=s.bigSize;status.appendChild(big);
+  s.subs.forEach(t=>{const sub=document.createElement('div');sub.className='sub'+(t.accent?' accent':'');sub.innerHTML=t.html;status.appendChild(sub);});
+  content.append(mw,status);
+  const ftr=document.createElement('div');ftr.className='ftr';
+  ftr.appendChild(buildBar('5H',s.h5,s.h5>=90,s.offline));ftr.appendChild(buildBar('WK',s.wk,s.wk>=90,s.offline));
+  stack.append(hdr,content,ftr);screen.appendChild(stack);return screen;}
+const STATES=[
+  {name:'offline',face:'offline',connected:false,offline:true,big:'OFFLINE',
+   subs:[{html:'mqtt: <span class="hl">no link</span>'},{html:'check broker'}],h5:0,wk:0},
+  {name:'maxed',face:'maxed',connected:true,offline:false,kicker:'maxed \u00b7 back in',bigTime:true,big:'1H 29M',bigColor:'var(--alert)',bigSize:'26px',
+   subs:[{html:'at <span class="hl">3:00p</span> &middot; 0 left',accent:true}],h5:100,wk:84},
+  {name:'working',face:'working',connected:true,offline:false,big:'WORKING',
+   subs:[{html:'spending tokens'},{html:'<span class="hl">+12.4k</span> this turn',accent:true}],h5:58,wk:47},
+  {name:'idle',face:'idle',connected:true,offline:false,big:'READY',
+   subs:[{html:'claude is idle'},{html:'waiting\u2026'}],h5:33,wk:44}
+];
+function render(){const i=Math.max(0,Math.min(3,parseInt((location.hash||'#0').slice(1))||0));
+  const root=document.getElementById('root');root.innerHTML='';root.appendChild(buildScreen(STATES[i]));}
+window.addEventListener('hashchange',render);render();
+</script>
+</body>
+</html>

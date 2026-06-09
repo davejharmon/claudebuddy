@@ -1,0 +1,14 @@
+[Unit]
+Description=claudebuddy Claude Usage Daemon
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/claudebuddy
+ExecStart=%h/claudebuddy/venv/bin/python %h/claudebuddy/daemon/claude_usage_mqtt.py
+Restart=on-failure
+RestartSec=10
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target
