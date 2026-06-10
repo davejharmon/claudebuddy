@@ -4,7 +4,7 @@
 #include "buddy_render.h"
 
 static uint16_t C_BG, C_BG2, C_INK, C_INKSOFT, C_CORAL, C_LITE, C_CLAY,
-                C_WHITE, C_ALERT, C_GHOST, C_BLUSH, C_OUTLINE;
+                C_WHITE, C_ALERT, C_GHOST, C_BLUSH, C_OUTLINE, C_AMBER;
 
 void buddyInitPalette(bool dark) {
     if (dark) {
@@ -25,6 +25,7 @@ void buddyInitPalette(bool dark) {
     // Mascot outline — always dark regardless of mode
     C_OUTLINE = M5.Display.color565(0x2B,0x27,0x22);
     // Accents are identical in both modes
+    C_AMBER   = M5.Display.color565(0xF0,0xC0,0x00);
     C_CORAL   = M5.Display.color565(0xD9,0x77,0x57);
     C_LITE    = M5.Display.color565(0xEC,0xB0,0x87);
     C_CLAY    = M5.Display.color565(0xB5,0x53,0x2F);
@@ -77,10 +78,11 @@ static void drawMascot(lgfx::LovyanGFX& gfx, int x, int y, int scale, BuddyState
             g[r][c] = BODY[r][c];
 
     applyCells(g, SHADE, sizeof(SHADE)/sizeof(Cell));
-    if      (st == ST_WORKING) applyCells(g, F_WORK,  sizeof(F_WORK)/sizeof(Cell));
-    else if (st == ST_MAXED)   applyCells(g, F_MAXED, sizeof(F_MAXED)/sizeof(Cell));
-    else if (st == ST_OFFLINE) applyCells(g, F_OFF,   sizeof(F_OFF)/sizeof(Cell));
-    else                       applyCells(g, F_IDLE,  sizeof(F_IDLE)/sizeof(Cell));
+    if      (st == ST_WORKING)    applyCells(g, F_WORK,  sizeof(F_WORK)/sizeof(Cell));
+    else if (st == ST_MAXED)      applyCells(g, F_MAXED, sizeof(F_MAXED)/sizeof(Cell));
+    else if (st == ST_OFFLINE ||
+             st == ST_CONNECTING) applyCells(g, F_OFF,   sizeof(F_OFF)/sizeof(Cell));
+    else                          applyCells(g, F_IDLE,  sizeof(F_IDLE)/sizeof(Cell));
 
     for (int r = 0; r < 16; r++)
         for (int c = 0; c < 16; c++) {
@@ -98,7 +100,7 @@ static void drawMascot(lgfx::LovyanGFX& gfx, int x, int y, int scale, BuddyState
         gfx.fillTriangle(dx+2, dy, dx, dy+4, dx+4, dy+4, C_WHITE);
         gfx.fillCircle(dx+2, dy+5, 2, C_WHITE);
         gfx.drawCircle(dx+2, dy+5, 2, C_INK);
-    } else if (st == ST_OFFLINE) {
+    } else if (st == ST_OFFLINE || st == ST_CONNECTING) {
         gfx.setFont(&fonts::Font0);
         gfx.setTextSize(1);
         gfx.setTextColor(C_INKSOFT, C_BG2);
@@ -137,8 +139,9 @@ static void drawBar(lgfx::LovyanGFX& gfx, const char* label, int y, int pct, boo
 
 // ── Full-screen render ────────────────────────────────────────────────────────
 void buddyRender(lgfx::LovyanGFX& gfx, const UI& ui) {
-    bool off    = (ui.state == ST_OFFLINE);
-    uint16_t ink = off ? C_INKSOFT : C_INK;
+    bool off        = (ui.state == ST_OFFLINE || ui.state == ST_CONNECTING);
+    bool connecting = (ui.state == ST_CONNECTING);
+    uint16_t ink    = off ? C_INKSOFT : C_INK;
 
     gfx.fillRect(0, 0, 320, 240, C_BG);
     gfx.fillRect(0, 0, 320,  60, C_BG2);   // lit top band
@@ -153,9 +156,11 @@ void buddyRender(lgfx::LovyanGFX& gfx, const UI& ui) {
     gfx.drawString("claudebuddy", 13, 9);
     gfx.setTextDatum(middle_right);
     gfx.setTextColor(C_INKSOFT, C_BG2);
-    gfx.drawString(off ? "no link" : "live", 320 - 16, 9);
-    if (off) gfx.drawCircle(320-8, 9, 3, C_INKSOFT);
-    else     gfx.fillCircle(320-8, 9, 3, C_CORAL);
+    const char* statusLabel = connecting ? "connecting..." : (off ? "no link" : "live");
+    gfx.drawString(statusLabel, 320 - 16, 9);
+    if (connecting)      gfx.fillCircle(320-8, 9, 3, C_AMBER);
+    else if (off)        gfx.drawCircle(320-8, 9, 3, C_INKSOFT);
+    else                 gfx.fillCircle(320-8, 9, 3, C_CORAL);
     gfx.drawFastHLine(0, 18, 320, C_GHOST);
     gfx.setTextDatum(top_left);
 
@@ -179,10 +184,11 @@ void buddyRender(lgfx::LovyanGFX& gfx, const UI& ui) {
         snprintf(line, sizeof(line), "at %s \xB7 0 left", ui.resetAt[0] ? ui.resetAt : "?");
         gfx.drawString(line, sx, 112);
     } else {
-        const char* big = ui.state == ST_WORKING ? "WORKING"
-                        : ui.state == ST_OFFLINE  ? "OFFLINE" : "READY";
+        const char* big = ui.state == ST_WORKING    ? "WORKING"
+                        : ui.state == ST_OFFLINE     ? "OFFLINE"
+                        : ui.state == ST_CONNECTING  ? "OFFLINE" : "READY";
         gfx.setTextSize(2);
-        gfx.setTextColor(ink, ui.state == ST_OFFLINE ? C_BG2 : C_BG);
+        gfx.setTextColor(ink, off ? C_BG2 : C_BG);
         gfx.drawString(big, sx, 74);
         gfx.setTextSize(1);
         gfx.setTextColor(C_INKSOFT, C_BG);
@@ -194,6 +200,10 @@ void buddyRender(lgfx::LovyanGFX& gfx, const UI& ui) {
             gfx.setTextColor(C_INKSOFT, C_BG2);
             gfx.drawString("mqtt: no link", sx, 100);
             gfx.drawString("check broker", sx, 114);
+        } else if (ui.state == ST_CONNECTING) {
+            gfx.setTextColor(C_INKSOFT, C_BG2);
+            gfx.drawString("connecting...", sx, 100);
+            gfx.drawString("mqtt broker", sx, 114);
         } else {
             gfx.drawString("claude is idle", sx, 100);
             gfx.drawString("waiting...", sx, 114);

@@ -12,7 +12,7 @@ try:
     publish.single(
         topic="clawdmeter/wake",
         payload="1",
-        hostname="192.168.1.123",
+        hostname="192.168.1.125",
         port=1883,
         keepalive=5,
     )

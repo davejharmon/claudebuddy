@@ -1,7 +1,7 @@
 #pragma once
 #include <M5Unified.h>
 
-enum BuddyState { ST_OFFLINE, ST_IDLE, ST_WORKING, ST_MAXED };
+enum BuddyState { ST_OFFLINE, ST_CONNECTING, ST_IDLE, ST_WORKING, ST_MAXED };
 
 struct UI {
     BuddyState state      = ST_OFFLINE;

@@ -10,8 +10,10 @@ static Preferences prefs;
 static uint32_t   g_last_active = 0;
 static bool       g_screen_on   = true;
 static bool       g_dark_mode   = false;
-static BuddyState g_prev_state  = ST_OFFLINE;
-static bool       g_prev_conn   = false;
+static BuddyState g_prev_state   = ST_OFFLINE;
+static bool       g_prev_conn    = false;
+static uint32_t   g_conn_lost_ms = 0;
+#define CONNECTING_TIMEOUT_MS 30000UL
 
 static M5Canvas g_canvas(&M5.Display);
 
@@ -58,10 +60,12 @@ void setup() {
 
     buddyInitPalette(g_dark_mode);
     g_canvas.createSprite(320, 240);
+    g_ui.state = ST_CONNECTING;
+    g_conn_lost_ms = millis();
     mqttSetup();
     g_last_active = millis();
     render();
-    M5.Display.setBrightness(brightForState(ST_OFFLINE));
+    M5.Display.setBrightness(brightForState(ST_CONNECTING));
 }
 
 void loop() {
@@ -69,11 +73,21 @@ void loop() {
     mqttLoop();
     bool redraw = false;
 
-    // MQTT connection dropped
+    // MQTT connection state changed
     if (g_mqtt_connected != g_prev_conn) {
         g_prev_conn = g_mqtt_connected;
-        if (!g_mqtt_connected) g_ui.state = ST_OFFLINE;
+        if (!g_mqtt_connected) {
+            g_conn_lost_ms = millis();
+            g_ui.state = ST_CONNECTING;
+        }
         if (g_screen_on) M5.Display.setBrightness(brightForState(g_ui.state));
+        redraw = true;
+    }
+
+    // Connecting too long → offline
+    if (!g_mqtt_connected && g_ui.state == ST_CONNECTING &&
+        millis() - g_conn_lost_ms > CONNECTING_TIMEOUT_MS) {
+        g_ui.state = ST_OFFLINE;
         redraw = true;
     }
 

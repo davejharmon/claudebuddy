@@ -12,18 +12,20 @@ States:
   (offline is decided by the device when MQTT drops — never published here)
 """
 
-import os, time, datetime, json, logging, sys
+import time, datetime, json, logging, sys
 from pathlib import Path
 import requests
 import paho.mqtt.client as mqtt
 
 # ── Config ────────────────────────────────────────────────────────────────────
-CREDENTIALS_PATH = Path.home() / ".claude" / ".credentials.json"
-MQTT_HOST         = "192.168.1.123"
+CREDENTIALS_PATH  = Path.home() / ".claude" / ".credentials.json"
+MQTT_HOST         = "192.168.1.125"
 MQTT_PORT         = 1883
 MQTT_TOPIC        = "claudebuddy/state"
 POLL_INTERVAL_S   = 60
 WORKING_HOLD_S    = 180   # seconds to stay "working" after last utilisation rise
+TOKEN_REFRESH_URL = "https://platform.claude.com/v1/oauth/token"
+CLIENT_ID         = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(message)s",
@@ -58,35 +60,79 @@ def fmt_reset_at(unix_ts: int) -> str:
     ampm = "a" if dt.hour < 12 else "p"
     return f"{h}:{dt.minute:02d}{ampm}"
 
-def read_token() -> str:
-    """Read OAuth access token from ~/.claude/.credentials.json."""
-    raw = CREDENTIALS_PATH.read_text()
-    data = json.loads(raw)
-    # Support both {"accessToken":...} and {"claudeAiOauth":{"accessToken":...}}
-    if "accessToken" in data:
-        return data["accessToken"]
-    if "claudeAiOauth" in data:
-        return data["claudeAiOauth"]["accessToken"]
-    raise RuntimeError("accessToken not found in credentials file")
+def read_creds() -> dict:
+    """Read credentials dict from ~/.claude/.credentials.json."""
+    data = json.loads(CREDENTIALS_PATH.read_text())
+    return data.get("claudeAiOauth") or data
 
-def fetch_headers() -> dict:
+def write_creds(creds: dict):
+    """Write updated credentials back to disk."""
+    data = json.loads(CREDENTIALS_PATH.read_text())
+    if "claudeAiOauth" in data:
+        data["claudeAiOauth"] = creds
+    else:
+        data = creds
+    CREDENTIALS_PATH.write_text(json.dumps(data, indent=2))
+
+def token_expires_at(creds: dict) -> float:
+    """Return expiry as a Unix timestamp in seconds."""
+    exp = creds.get("expiresAt", 0)
+    return exp / 1000 if exp > 1e10 else float(exp)
+
+def refresh_token(creds: dict) -> dict:
+    """Exchange refresh token for a new access token. Returns updated creds dict."""
+    log.info("refreshing OAuth token...")
+    resp = requests.post(
+        TOKEN_REFRESH_URL,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        data={
+            "grant_type":    "refresh_token",
+            "refresh_token": creds["refreshToken"],
+            "client_id":     CLIENT_ID,
+        },
+        timeout=15,
+    )
+    resp.raise_for_status()
+    body = resp.json()
+    if "error" in body:
+        raise RuntimeError(f"token refresh failed: {body}")
+    # Update in-place, preserving any fields the response doesn't include
+    updated = dict(creds)
+    updated["accessToken"] = body["access_token"]
+    if "refresh_token" in body:
+        updated["refreshToken"] = body["refresh_token"]
+    if "expires_in" in body:
+        updated["expiresAt"] = int((time.time() + body["expires_in"]) * 1000)
+    write_creds(updated)
+    log.info("token refreshed, expires in %ds", body.get("expires_in", 0))
+    return updated
+
+def ensure_fresh_token(creds: dict) -> dict:
+    """Refresh if token expires within 5 minutes."""
+    if time.time() > token_expires_at(creds) - 300:
+        creds = refresh_token(creds)
+    return creds
+
+def fetch_headers(creds: dict) -> dict:
     """Make a minimal Anthropic API call to get rate-limit headers."""
-    token = read_token()
     resp = requests.post(
         "https://api.anthropic.com/v1/messages",
         headers={
-            "Authorization":   f"Bearer {token}",
+            "Authorization":     f"Bearer {creds['accessToken']}",
             "anthropic-version": "2023-06-01",
-            "anthropic-beta":  "oauth-2025-04-20",
-            "content-type":    "application/json",
+            "anthropic-beta":    "oauth-2025-04-20",
+            "content-type":      "application/json",
         },
         json={
-            "model":      "claude-haiku-4-5-20251001",
+            "model":    "claude-haiku-4-5-20251001",
             "max_tokens": 1,
-            "messages":   [{"role": "user", "content": "."}],
+            "messages": [{"role": "user", "content": "."}],
         },
         timeout=30,
     )
+    if resp.status_code == 401:
+        raise RuntimeError("OAuth token rejected (401) — token may need manual refresh")
+    resp.raise_for_status()
     return resp.headers
 
 # ── Daemon ────────────────────────────────────────────────────────────────────
@@ -100,21 +146,22 @@ def main():
     client.loop_start()
     log.info("MQTT connected to %s:%d", MQTT_HOST, MQTT_PORT)
 
+    creds = read_creds()
     prev_h5 = None
     last_rise_ts = 0.0
 
     while True:
         try:
-            hdrs = fetch_headers()
+            creds = ensure_fresh_token(creds)
+            hdrs = fetch_headers(creds)
 
-            # Parse 5h window
             h5_pct  = round(float(hdrs.get("anthropic-ratelimit-unified-5h-utilization", "0")) * 100)
             wk_pct  = round(float(hdrs.get("anthropic-ratelimit-unified-7d-utilization", "0")) * 100)
             h5_rst  = hdrs.get("anthropic-ratelimit-unified-5h-reset", "0")
             wk_rst  = hdrs.get("anthropic-ratelimit-unified-7d-reset", "0")
 
             h5_mins, h5_ts = parse_reset(h5_rst)
-            _,       _     = parse_reset(wk_rst)   # wk reset not shown in UI currently
+            _,       _     = parse_reset(wk_rst)
 
             now = time.time()
             note = ""
