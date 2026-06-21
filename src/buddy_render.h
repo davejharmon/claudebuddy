@@ -11,6 +11,8 @@ struct UI {
     char       resetAt[16] = "";         // "3:00p"   (maxed only)
     char       note[28]    = "";         // "+13pt this poll" (working only)
     bool       fresh       = false;
+    int        battery     = -1;         // 0-100, -1 = unknown
+    bool       charging    = false;
 };
 
 void buddyInitPalette(bool dark = false);

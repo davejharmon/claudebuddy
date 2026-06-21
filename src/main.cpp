@@ -13,7 +13,9 @@ static bool       g_dark_mode   = false;
 static BuddyState g_prev_state   = ST_OFFLINE;
 static bool       g_prev_conn    = false;
 static uint32_t   g_conn_lost_ms = 0;
+static uint32_t   g_batt_ms      = 0;
 #define CONNECTING_TIMEOUT_MS 30000UL
+#define BATT_INTERVAL_MS      30000UL
 
 static M5Canvas g_canvas(&M5.Display);
 
@@ -60,6 +62,8 @@ void setup() {
 
     buddyInitPalette(g_dark_mode);
     g_canvas.createSprite(320, 240);
+    g_ui.battery  = M5.Power.getBatteryLevel();
+    g_ui.charging = M5.Power.isCharging();
     g_ui.state = ST_CONNECTING;
     g_conn_lost_ms = millis();
     mqttSetup();
@@ -99,6 +103,18 @@ void loop() {
         g_prev_state = g_ui.state;
         if (g_screen_on) M5.Display.setBrightness(brightForState(g_ui.state));
         redraw = true;
+    }
+
+    // Battery level (polled every 30s)
+    if (millis() - g_batt_ms >= BATT_INTERVAL_MS) {
+        g_batt_ms = millis();
+        int  lvl = M5.Power.getBatteryLevel();
+        bool chg = M5.Power.isCharging();
+        if (lvl != g_ui.battery || chg != g_ui.charging) {
+            g_ui.battery  = lvl;
+            g_ui.charging = chg;
+            redraw = true;
+        }
     }
 
     // Hook: prompt submitted in Claude Code

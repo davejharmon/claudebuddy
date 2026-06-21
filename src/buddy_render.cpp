@@ -110,6 +110,16 @@ static void drawMascot(lgfx::LovyanGFX& gfx, int x, int y, int scale, BuddyState
     }
 }
 
+// ── Battery icon ─────────────────────────────────────────────────────────────
+static void drawBattery(lgfx::LovyanGFX& gfx, int x, int y, int pct, bool chg) {
+    const int bw = 12, bh = 8;
+    uint16_t col = chg ? C_CORAL : (pct < 20 ? C_ALERT : (pct < 50 ? C_AMBER : C_INKSOFT));
+    gfx.drawRect(x, y, bw, bh, C_INKSOFT);
+    gfx.fillRect(x + bw, y + 2, 2, 4, C_INKSOFT);
+    int fill = (pct * (bw - 2) + 50) / 100;
+    if (fill > 0) gfx.fillRect(x + 1, y + 1, fill, bh - 2, col);
+}
+
 // ── Usage bar (12 segments) ───────────────────────────────────────────────────
 static void drawBar(lgfx::LovyanGFX& gfx, const char* label, int y, int pct, bool alert, bool off) {
     gfx.setFont(&fonts::Font0);
@@ -154,13 +164,17 @@ void buddyRender(lgfx::LovyanGFX& gfx, const UI& ui) {
     gfx.drawString("/", 8, 9);
     gfx.setTextColor(ink, C_BG2);
     gfx.drawString("claudebuddy", 13, 9);
+    bool hasBatt  = (ui.battery >= 0);
+    int  dotX     = hasBatt ? 296 : 312;
+    int  labelX   = hasBatt ? 290 : 304;
     gfx.setTextDatum(middle_right);
     gfx.setTextColor(C_INKSOFT, C_BG2);
     const char* statusLabel = connecting ? "connecting..." : (off ? "no link" : "live");
-    gfx.drawString(statusLabel, 320 - 16, 9);
-    if (connecting)      gfx.fillCircle(320-8, 9, 3, C_AMBER);
-    else if (off)        gfx.drawCircle(320-8, 9, 3, C_INKSOFT);
-    else                 gfx.fillCircle(320-8, 9, 3, C_CORAL);
+    gfx.drawString(statusLabel, labelX, 9);
+    if (connecting)      gfx.fillCircle(dotX, 9, 3, C_AMBER);
+    else if (off)        gfx.drawCircle(dotX, 9, 3, C_INKSOFT);
+    else                 gfx.fillCircle(dotX, 9, 3, C_CORAL);
+    if (hasBatt) drawBattery(gfx, 303, 5, ui.battery, ui.charging);
     gfx.drawFastHLine(0, 18, 320, C_GHOST);
     gfx.setTextDatum(top_left);
 
