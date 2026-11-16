@@ -4,6 +4,8 @@
 #include <time.h>
 #include "buddy_render.h"
 #include "mqtt_handler.h"
+#include "agents.h"
+#include "agent_render.h"
 
 static Preferences prefs;
 
@@ -19,6 +21,14 @@ static uint32_t   g_batt_ms      = 0;
 #define BATT_INTERVAL_MS      30000UL
 // The daemon publishes every 60 s; anything older than this is not trusted.
 #define STALE_AFTER_S         300UL
+#define AGE_INTERVAL_MS       1000UL
+#define TICK_ACTIVE_MS        500UL    // redraw rate while an agent is working (blink, ages)
+#define TICK_IDLE_MS          15000UL  // redraw rate otherwise (ages only)
+
+static int      g_top      = 0;       // first agent row shown
+static uint32_t g_age_ms   = 0;
+static uint32_t g_tick_ms  = 0;
+static uint32_t g_chime2_ms = 0;      // second note of the needs-you chime, 0 = none
 
 // True if the current reading is too old: nothing new for STALE_AFTER_S, or
 // (once NTP has synced) the daemon's own timestamp is that old, which catches
@@ -41,9 +51,28 @@ static uint8_t brightForState(BuddyState s) {
     }
 }
 
+// Agent board when there are agents, otherwise the usage screen.
+static uint8_t brightness() {
+    if (g_agentCount == 0)            return brightForState(g_ui.state);
+    if (agentsCount(AG_NEEDS_YOU))    return 255;
+    if (agentsCount(AG_WORKING))      return 200;
+    return g_mqtt_connected ? 120 : 40;
+}
+
+static void clampScroll() {
+    int maxTop = max(0, g_agentCount - AGENT_ROWS);
+    g_top = constrain(g_top, 0, maxTop);
+}
+
 static void render() {
-    buddyRender(g_canvas, g_ui);
+    if (g_agentCount > 0) agentsRender(g_canvas, g_ui, g_mqtt_connected, g_top);
+    else                  buddyRender(g_canvas, g_ui);
     g_canvas.pushSprite(0, 0);
+}
+
+static void chime() {
+    M5.Speaker.tone(1760, 90);
+    g_chime2_ms = millis() + 130;
 }
 
 static void screenOn() {
@@ -52,7 +81,7 @@ static void screenOn() {
         g_screen_on = true;
         render();
     }
-    M5.Display.setBrightness(brightForState(g_ui.state));
+    M5.Display.setBrightness(brightness());
     g_last_active = millis();
 }
 
@@ -79,6 +108,7 @@ void setup() {
     g_ui.charging = M5.Power.isCharging();
     g_ui.state = ST_CONNECTING;
     g_conn_lost_ms = millis();
+    M5.Speaker.setVolume(110);
     mqttSetup();
     g_last_active = millis();
     render();
@@ -97,7 +127,7 @@ void loop() {
             g_conn_lost_ms = millis();
             g_ui.state = ST_CONNECTING;
         }
-        if (g_screen_on) M5.Display.setBrightness(brightForState(g_ui.state));
+        if (g_screen_on) M5.Display.setBrightness(brightness());
         redraw = true;
     }
 
@@ -114,7 +144,7 @@ void loop() {
         bool became_working = (g_prev_state != ST_WORKING && g_ui.state == ST_WORKING);
         if (became_working) screenOn();            // wake immediately when Claude starts spending
         g_prev_state = g_ui.state;
-        if (g_screen_on) M5.Display.setBrightness(brightForState(g_ui.state));
+        if (g_screen_on) M5.Display.setBrightness(brightness());
         redraw = true;
     }
 
@@ -125,7 +155,7 @@ void loop() {
         g_ui.state = ST_STALE;
         strlcpy(g_ui.note, "no data from daemon", sizeof(g_ui.note));
         g_prev_state = ST_STALE;
-        if (g_screen_on) M5.Display.setBrightness(brightForState(g_ui.state));
+        if (g_screen_on) M5.Display.setBrightness(brightness());
         redraw = true;
     }
 
@@ -141,18 +171,50 @@ void loop() {
         }
     }
 
-    // Hook: prompt submitted in Claude Code
+    // Agent board: ageing, changes, wake and chime
+    if (millis() - g_age_ms >= AGE_INTERVAL_MS) { g_age_ms = millis(); agentsAge(); }
+    if (g_agentsChanged) {
+        g_agentsChanged = false;
+        clampScroll();
+        if (g_screen_on) M5.Display.setBrightness(brightness());
+        redraw = true;
+    }
+    if (g_agentWake)  { g_agentWake = false; g_top = 0; screenOn(); redraw = true; }
+    if (g_agentChime) { g_agentChime = false; chime(); }
+    if (g_chime2_ms && (int32_t)(millis() - g_chime2_ms) >= 0) {
+        g_chime2_ms = 0;
+        M5.Speaker.tone(2349, 140);
+    }
+    // Stay awake while any agent is working or waiting on you.
+    if (agentsAnyActive()) g_last_active = millis();
+    // Periodic redraw for the working blip and "3m ago" ages
+    if (g_agentCount > 0 && g_screen_on &&
+        millis() - g_tick_ms >= (agentsAnyActive() ? TICK_ACTIVE_MS : TICK_IDLE_MS)) {
+        g_tick_ms = millis();
+        redraw = true;
+    }
+
+    // Hook: prompt submitted in Claude Code (legacy wake topic)
     if (g_wake) { g_wake = false; screenOn(); redraw = true; }
 
-    // A/B: wake only
-    if (M5.BtnA.wasPressed() || M5.BtnB.wasPressed()) {
-        screenOn(); redraw = true;
-    }
-    // C: wake when off, toggle dark mode when on
-    if (M5.BtnC.wasPressed()) {
-        if (!g_screen_on) {
-            screenOn(); redraw = true;
-        } else {
+    // Buttons. Any press wakes a sleeping screen and does nothing else.
+    // Awake: A = scroll up, C = scroll down, B = back to top, hold B = dark mode.
+    auto touch = M5.Touch.getDetail();
+    bool anyPress = M5.BtnA.wasPressed() || M5.BtnB.wasPressed() || M5.BtnC.wasPressed() ||
+                    touch.wasPressed();
+    if (!g_screen_on) {
+        if (anyPress) { screenOn(); redraw = true; }
+    } else {
+        if (anyPress) g_last_active = millis();
+        if (M5.BtnA.wasPressed())  { g_top--; clampScroll(); redraw = true; }
+        if (M5.BtnC.wasPressed())  { g_top++; clampScroll(); redraw = true; }
+        if (M5.BtnB.wasClicked())  { g_top = 0; redraw = true; }
+        if (touch.wasFlicked()) {                    // swipe up = scroll down
+            g_top += touch.distanceY() < 0 ? AGENT_ROWS - 1 : -(AGENT_ROWS - 1);
+            clampScroll();
+            redraw = true;
+        }
+        if (M5.BtnB.wasHold()) {
             g_dark_mode = !g_dark_mode;
             prefs.begin("buddy", false);
             prefs.putBool("dark", g_dark_mode);

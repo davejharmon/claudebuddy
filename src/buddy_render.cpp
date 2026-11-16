@@ -6,6 +6,8 @@
 static uint16_t C_BG, C_BG2, C_INK, C_INKSOFT, C_CORAL, C_LITE, C_CLAY,
                 C_WHITE, C_ALERT, C_GHOST, C_BLUSH, C_OUTLINE, C_AMBER;
 
+BuddyPal g_pal;
+
 void buddyInitPalette(bool dark) {
     if (dark) {
         // Warm dark — charcoal-brown bg, cream text, same coral accents
@@ -32,6 +34,8 @@ void buddyInitPalette(bool dark) {
     C_WHITE   = M5.Display.color565(0xF6,0xEF,0xE0);
     C_ALERT   = M5.Display.color565(0xC0,0x49,0x2B);
     C_BLUSH   = M5.Display.color565(0xCF,0x6A,0x49);
+    g_pal = { C_BG, C_BG2, C_INK, C_INKSOFT, C_GHOST, C_CORAL, C_LITE, C_CLAY,
+              C_WHITE, C_ALERT, C_AMBER };
 }
 
 // ── Mascot ────────────────────────────────────────────────────────────────────
@@ -111,7 +115,7 @@ static void drawMascot(lgfx::LovyanGFX& gfx, int x, int y, int scale, BuddyState
 }
 
 // ── Battery icon ─────────────────────────────────────────────────────────────
-static void drawBattery(lgfx::LovyanGFX& gfx, int x, int y, int pct, bool chg) {
+void buddyDrawBattery(lgfx::LovyanGFX& gfx, int x, int y, int pct, bool chg) {
     const int bw = 12, bh = 8;
     uint16_t col = chg ? C_CORAL : (pct < 20 ? C_ALERT : (pct < 50 ? C_AMBER : C_INKSOFT));
     gfx.drawRect(x, y, bw, bh, C_INKSOFT);
@@ -176,7 +180,7 @@ void buddyRender(lgfx::LovyanGFX& gfx, const UI& ui) {
     if (connecting || stale) gfx.fillCircle(dotX, 9, 3, C_AMBER);
     else if (off)        gfx.drawCircle(dotX, 9, 3, C_INKSOFT);
     else                 gfx.fillCircle(dotX, 9, 3, C_CORAL);
-    if (hasBatt) drawBattery(gfx, 303, 5, ui.battery, ui.charging);
+    if (hasBatt) buddyDrawBattery(gfx, 303, 5, ui.battery, ui.charging);
     gfx.drawFastHLine(0, 18, 320, C_GHOST);
     gfx.setTextDatum(top_left);
 

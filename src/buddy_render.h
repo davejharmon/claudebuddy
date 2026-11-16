@@ -18,5 +18,12 @@ struct UI {
     bool       charging    = false;
 };
 
+// Current palette, shared with the agent list screen. Set by buddyInitPalette().
+struct BuddyPal {
+    uint16_t bg, bg2, ink, inkSoft, ghost, coral, lite, clay, white, alert, amber;
+};
+extern BuddyPal g_pal;
+
 void buddyInitPalette(bool dark = false);
 void buddyRender(lgfx::LovyanGFX& gfx, const UI& ui);
+void buddyDrawBattery(lgfx::LovyanGFX& gfx, int x, int y, int pct, bool chg);

@@ -16,7 +16,7 @@ A desk companion for Claude Code on an **M5Stack Core2**. Shows your Claude API 
 
 The screen sleeps after 5 minutes of idle and wakes automatically when you start talking to Claude (via a Claude Code hook), or when usage resets.
 
-Press **C** (rightmost touch button) to toggle dark / light mode. The preference persists across reboots.
+Hold **B** (middle touch button) to toggle dark / light mode. The preference persists across reboots.
 
 ## Hardware
 
@@ -101,6 +101,47 @@ Edit `hooks/wake.py` and set the correct MQTT broker IP, then add to `~/.claude/
   }
 }
 ```
+
+### 4. Agent board (one row per Claude Code session)
+
+When any Claude Code session is active, the screen switches from the usage view to a list of agents: **NEEDS YOU** (amber, chimes and wakes the screen), **ERROR**, **WORKING**, then **DONE**. The header shows how many need you plus 5h/7d usage. The screen stays on while any agent is working or waiting on you, and sleeps 5 minutes after the last one finishes. With no agents it shows the usage view as before.
+
+`hooks/agent_event.py` (standard library only, no `pip install`) publishes each session's state. Add it to `~/.claude/settings.json` in place of `wake.py`:
+
+```json
+{
+  "hooks": {
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "async": true, "command": "python \"C:\\path\\to\\claudebuddy\\hooks\\agent_event.py\"" }] }],
+    "PostToolUse":      [{ "hooks": [{ "type": "command", "async": true, "command": "python \"C:\\path\\to\\claudebuddy\\hooks\\agent_event.py\"" }] }],
+    "Notification":     [{ "hooks": [{ "type": "command", "async": true, "command": "python \"C:\\path\\to\\claudebuddy\\hooks\\agent_event.py\"" }] }],
+    "Stop":             [{ "hooks": [{ "type": "command", "async": true, "command": "python \"C:\\path\\to\\claudebuddy\\hooks\\agent_event.py\"" }] }],
+    "StopFailure":      [{ "hooks": [{ "type": "command", "async": true, "command": "python \"C:\\path\\to\\claudebuddy\\hooks\\agent_event.py\"" }] }],
+    "SessionEnd":       [{ "hooks": [{ "type": "command", "async": true, "command": "python \"C:\\path\\to\\claudebuddy\\hooks\\agent_event.py\"" }] }]
+  }
+}
+```
+
+Set `CLAUDEBUDDY_MQTT_HOST` if your broker isn't `192.168.1.125`.
+
+| Hook | Board |
+|------|-------|
+| `UserPromptSubmit`, `PostToolUse` | WORKING |
+| `Notification` (`permission_prompt`, `agent_needs_input`, `elicitation_dialog`) | NEEDS YOU |
+| `Stop` | DONE |
+| `StopFailure` | ERROR |
+| `SessionEnd` | removed |
+
+Rows age out: DONE after 30 min, ERROR after 1 h, a silent WORKING after 6 h (shown as QUIET after 30 min), NEEDS YOU after 12 h.
+
+**Buttons:** A scroll up, C scroll down, B back to top, hold B to toggle dark mode, swipe to page. Any press wakes a sleeping screen.
+
+Topic: `claudebuddy/agents/<session_id>` (retained)
+
+```json
+{"name": "Refactor auth", "state": "needs_you", "msg": "Claude needs your permission", "host": "dave-pc", "ts": 1763280000}
+```
+
+An empty retained payload removes the agent.
 
 ## UI design
 

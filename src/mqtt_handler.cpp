@@ -3,18 +3,32 @@
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
+#include "agents.h"
 
 UI       g_ui;
 bool     g_mqtt_connected = false;
 bool     g_wake           = false;
 uint32_t g_last_msg_ms    = 0;
+uint32_t g_mqtt_connected_ms = 0;
 
 static WiFiClient   wifiClient;
 static PubSubClient mqtt(wifiClient);
+static const char*  AGENTS_PREFIX = "claudebuddy/agents/";
+
+void mqttClearAgent(const char* sessionId) {
+    if (!mqtt.connected()) return;
+    char topic[64];
+    snprintf(topic, sizeof(topic), "%s%s", AGENTS_PREFIX, sessionId);
+    mqtt.publish(topic, (const uint8_t*)"", 0, true);   // empty retained = delete
+}
 
 static void onMessage(char* topic, byte* payload, unsigned int len) {
     if (strcmp(topic, "clawdmeter/wake") == 0) {
         g_wake = true;
+        return;
+    }
+    if (strncmp(topic, AGENTS_PREFIX, strlen(AGENTS_PREFIX)) == 0) {
+        agentsOnMessage(topic + strlen(AGENTS_PREFIX), payload, len);
         return;
     }
     JsonDocument doc;
@@ -53,8 +67,10 @@ static void connectWifi() {
 static void connectMqtt() {
     Serial.printf("MQTT: connecting to %s:%d... ", MQTT_HOST, MQTT_PORT);
     if (mqtt.connect("claudebuddy")) {
+        g_mqtt_connected_ms = millis();
         mqtt.subscribe(MQTT_TOPIC);
         mqtt.subscribe("clawdmeter/wake");
+        mqtt.subscribe("claudebuddy/agents/#");
         Serial.println("ok");
     } else {
         Serial.printf("failed rc=%d\n", mqtt.state());
@@ -67,6 +83,7 @@ void mqttSetup() {
     configTime(0, 0, "pool.ntp.org", "time.google.com");   // UTC; only used to age readings
     mqtt.setServer(MQTT_HOST, MQTT_PORT);
     mqtt.setCallback(onMessage);
+    mqtt.setBufferSize(512);                               // agent payloads + long topics
     connectMqtt();
 }
 
