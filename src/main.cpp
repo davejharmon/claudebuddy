@@ -51,7 +51,7 @@ static uint8_t brightForState(BuddyState s) {
     }
 }
 
-// Agent board when there are agents, otherwise the usage screen.
+// With no agents, brightness follows the usage state.
 static uint8_t brightness() {
     if (g_agentCount == 0)            return brightForState(g_ui.state);
     if (agentsCount(AG_NEEDS_YOU))    return 255;
@@ -65,8 +65,7 @@ static void clampScroll() {
 }
 
 static void render() {
-    if (g_agentCount > 0) agentsRender(g_canvas, g_ui, g_mqtt_connected, g_top);
-    else                  buddyRender(g_canvas, g_ui);
+    agentsRender(g_canvas, g_ui, g_mqtt_connected, g_top);
     g_canvas.pushSprite(0, 0);
 }
 

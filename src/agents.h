@@ -3,7 +3,7 @@
 // messages on claudebuddy/agents/<session_id> (see hooks/agent_event.py).
 //
 // Payload: {"name":"claudebuddy","state":"needs_you","msg":"Claude needs your permission",
-//           "host":"DAVE-PC","ts":1763280000}
+//           "host":"DAVE-PC","model":"opus 5.5","ts":1763280000}
 // state: working | needs_you | done | error.  An empty payload removes the agent.
 #include <Arduino.h>
 
@@ -14,6 +14,7 @@ struct Agent {
     char       name[24];
     char       msg[40];
     char       host[16];
+    char       model[16]; // short model name, "opus 5.5"; "" = unknown
     AgentState state;
     uint32_t   ts;        // daemon/hook Unix time of the last event, 0 = unknown
     uint32_t   rxMs;      // millis() when the last event arrived here

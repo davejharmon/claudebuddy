@@ -18,12 +18,16 @@ struct UI {
     bool       charging    = false;
 };
 
-// Current palette, shared with the agent list screen. Set by buddyInitPalette().
+// Current palette. Set by buddyInitPalette().
 struct BuddyPal {
-    uint16_t bg, bg2, ink, inkSoft, ghost, coral, lite, clay, white, alert, amber;
+    uint16_t bg, bg2, ink, inkSoft, ghost, coral, lite, clay, white, alert, amber, green;
 };
 extern BuddyPal g_pal;
 
 void buddyInitPalette(bool dark = false);
-void buddyRender(lgfx::LovyanGFX& gfx, const UI& ui);
 void buddyDrawBattery(lgfx::LovyanGFX& gfx, int x, int y, int pct, bool chg);
+
+// Shared header for both screens: 5h and 1w usage bars, link dot, battery.
+// `linked` = MQTT connected. Draws rows 0..BUDDY_HEADER_H (rule included).
+#define BUDDY_HEADER_H 22
+void buddyDrawHeader(lgfx::LovyanGFX& gfx, const UI& ui, bool linked);

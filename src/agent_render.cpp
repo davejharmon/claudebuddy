@@ -2,12 +2,12 @@
 #include "agent_render.h"
 #include "agents.h"
 
-static const int HEADER_H = 22;
-static const int ROW_Y0   = 26;
+static const int ROW_Y0   = BUDDY_HEADER_H + 4;
 static const int ROW_H    = 42;          // 5 rows: 26 + 5*42 = 236
-static const int PILL_W   = 92;
-static const int TEXT_X   = 8 + PILL_W + 10;
-static const int TEXT_W   = 306 - TEXT_X;
+static const int ICON_X   = 19;          // state icon centre
+static const int ICON_R   = 10;
+static const int TEXT_X   = ICON_X + ICON_R + 7;
+static const int TEXT_W   = 312 - TEXT_X;
 
 // Draw `s` clipped with "..." so it fits in `maxW` pixels in the current font.
 static void drawFit(lgfx::LovyanGFX& gfx, const char* s, int x, int y, int maxW) {
@@ -29,53 +29,44 @@ static void fmtAge(uint32_t s, char* out, size_t n) {
     else               snprintf(out, n, "%uh", (unsigned)(s / 3600));
 }
 
-static void drawHeader(lgfx::LovyanGFX& gfx, const UI& ui, bool linked) {
-    gfx.fillRect(0, 0, 320, HEADER_H, g_pal.bg2);
-    gfx.setFont(&fonts::Font0);
-    gfx.setTextSize(1);
-    gfx.setTextDatum(middle_left);
-
-    // Left: needs-you / working counts, or the name when nothing is going on.
-    int needs = agentsCount(AG_NEEDS_YOU), working = agentsCount(AG_WORKING);
-    char left[32];
-    if (needs)        snprintf(left, sizeof(left), "%d need%s you", needs, needs == 1 ? "s" : "");
-    else if (working) snprintf(left, sizeof(left), "%d working", working);
-    else              snprintf(left, sizeof(left), "claudebuddy");
-    gfx.setTextColor(g_pal.coral, g_pal.bg2);
-    gfx.drawString("/", 8, 11);
-    gfx.setTextColor(needs ? g_pal.clay : g_pal.ink, g_pal.bg2);
-    gfx.drawString(left, 15, 11);
-
-    // Right: usage, link dot, battery.
-    bool usageOk = linked && (ui.state == ST_IDLE || ui.state == ST_WORKING || ui.state == ST_MAXED);
-    char usage[32];
-    if (usageOk) snprintf(usage, sizeof(usage), "5h %d%%  7d %d%%", ui.h5, ui.wk);
-    else         snprintf(usage, sizeof(usage), "5h --  7d --");
-    gfx.setTextDatum(middle_right);
-    gfx.setTextColor((usageOk && (ui.h5 >= 90 || ui.wk >= 90)) ? g_pal.alert : g_pal.inkSoft, g_pal.bg2);
-    gfx.drawString(usage, 284, 11);
-    if (!linked)        gfx.drawCircle(292, 11, 3, g_pal.inkSoft);
-    else if (!usageOk)  gfx.fillCircle(292, 11, 3, g_pal.amber);
-    else                gfx.fillCircle(292, 11, 3, g_pal.coral);
-    if (ui.battery >= 0) buddyDrawBattery(gfx, 300, 7, ui.battery, ui.charging);
-    gfx.drawFastHLine(0, HEADER_H, 320, g_pal.ghost);
-    gfx.setTextDatum(top_left);
+// Round state icon: DONE green tick, WORKING coral spinner, QUIET grey dots,
+// NEEDS YOU amber "!", ERROR red cross. Accent colours read on both themes.
+static void drawStateIcon(lgfx::LovyanGFX& gfx, AgentState st, bool quiet, int cx, int cy, int phase) {
+    const uint16_t dark = M5.Display.color565(0x2B, 0x27, 0x22);
+    const int r = ICON_R;
+    switch (st) {
+        case AG_DONE:
+            gfx.fillCircle(cx, cy, r, g_pal.green);
+            gfx.drawWideLine(cx - 5, cy + 0, cx - 2, cy + 4, 1.3f, g_pal.white);
+            gfx.drawWideLine(cx - 2, cy + 4, cx + 5, cy - 4, 1.3f, g_pal.white);
+            break;
+        case AG_NEEDS_YOU:
+            gfx.fillCircle(cx, cy, r, g_pal.amber);
+            gfx.fillRoundRect(cx - 1, cy - 6, 3, 8, 1, dark);
+            gfx.fillRect(cx - 1, cy + 4, 3, 3, dark);
+            break;
+        case AG_ERROR:
+            gfx.fillCircle(cx, cy, r, g_pal.alert);
+            gfx.drawWideLine(cx - 4, cy - 4, cx + 4, cy + 4, 1.3f, g_pal.white);
+            gfx.drawWideLine(cx - 4, cy + 4, cx + 4, cy - 4, 1.3f, g_pal.white);
+            break;
+        default:  // AG_WORKING
+            if (quiet) {
+                gfx.fillCircle(cx, cy, r, g_pal.ghost);
+                gfx.drawCircle(cx, cy, r, g_pal.inkSoft);
+                for (int i = -1; i <= 1; i++) gfx.fillCircle(cx + i * 4, cy, 1, g_pal.inkSoft);
+            } else {
+                gfx.fillCircle(cx, cy, r, g_pal.coral);
+                float a0 = phase * 90.0f;             // turns a quarter per redraw
+                gfx.fillArc(cx, cy, 6, 4, a0, a0 + 270.0f, g_pal.white);
+            }
+            break;
+    }
 }
 
-static void drawRow(lgfx::LovyanGFX& gfx, const Agent& a, int y, bool blinkOn) {
-    const uint16_t dark = M5.Display.color565(0x2B, 0x27, 0x22);
+static void drawRow(lgfx::LovyanGFX& gfx, const Agent& a, int y, int phase) {
     uint32_t age = agentAgeS(a);
     bool quiet = (a.state == AG_WORKING && age > 30 * 60);   // no event for a long time
-
-    const char* label;  uint16_t pill, pillInk;
-    switch (a.state) {
-        case AG_NEEDS_YOU: label = "NEEDS YOU"; pill = g_pal.amber;  pillInk = dark;        break;
-        case AG_ERROR:     label = "ERROR";     pill = g_pal.alert;  pillInk = g_pal.white; break;
-        case AG_WORKING:   label = quiet ? "QUIET" : "WORKING";
-                           pill = quiet ? g_pal.ghost : g_pal.coral;
-                           pillInk = quiet ? g_pal.inkSoft : g_pal.white;               break;
-        default:           label = "DONE";      pill = g_pal.ghost;  pillInk = g_pal.inkSoft; break;
-    }
 
     gfx.fillRoundRect(4, y, 312, ROW_H - 4, 6, g_pal.bg2);
     if (a.state == AG_NEEDS_YOU) {
@@ -83,15 +74,7 @@ static void drawRow(lgfx::LovyanGFX& gfx, const Agent& a, int y, bool blinkOn) {
         gfx.drawRoundRect(5, y + 1, 310, ROW_H - 6, 5, g_pal.amber);
     }
 
-    // State pill
-    gfx.fillRoundRect(8, y + 8, PILL_W, 22, 5, pill);
-    gfx.setFont(&fonts::Font0);
-    gfx.setTextSize(1);
-    gfx.setTextDatum(middle_center);
-    gfx.setTextColor(pillInk, pill);
-    gfx.drawString(label, 8 + PILL_W / 2, y + 19);
-    if (a.state == AG_WORKING && !quiet && blinkOn)          // activity blip
-        gfx.fillCircle(8 + PILL_W - 7, y + 12, 2, g_pal.white);
+    drawStateIcon(gfx, a.state, quiet, ICON_X, y + (ROW_H - 4) / 2, phase);
 
     // Name (bold) and detail line
     gfx.setTextDatum(top_left);
@@ -99,24 +82,58 @@ static void drawRow(lgfx::LovyanGFX& gfx, const Agent& a, int y, bool blinkOn) {
     gfx.setTextColor(a.state == AG_DONE ? g_pal.inkSoft : g_pal.ink, g_pal.bg2);
     drawFit(gfx, a.name[0] ? a.name : "agent", TEXT_X, y + 3, TEXT_W);
 
-    char ageS[8], detail[64];
+    // "msg - age - host - model", skipping any part that's empty
+    char ageS[8], detail[96];
     fmtAge(age, ageS, sizeof(ageS));
-    if (a.msg[0] && a.host[0]) snprintf(detail, sizeof(detail), "%s - %s - %s", a.msg, ageS, a.host);
-    else if (a.msg[0])         snprintf(detail, sizeof(detail), "%s - %s", a.msg, ageS);
-    else if (a.host[0])        snprintf(detail, sizeof(detail), "%s - %s", ageS, a.host);
-    else                       snprintf(detail, sizeof(detail), "%s", ageS);
+    const char* parts[] = { a.msg, ageS, a.host, a.model };
+    detail[0] = 0;
+    for (const char* p : parts) {
+        if (!p[0]) continue;
+        if (detail[0]) strlcat(detail, " - ", sizeof(detail));
+        strlcat(detail, p, sizeof(detail));
+    }
     gfx.setFont(&fonts::Font0);
     gfx.setTextColor(g_pal.inkSoft, g_pal.bg2);
     drawFit(gfx, detail, TEXT_X, y + 24, TEXT_W);
 }
 
+// Empty board: one centred line on the link / usage state, one hint below.
+static void drawEmpty(lgfx::LovyanGFX& gfx, const UI& ui) {
+    const char* title;  char sub[48];
+    uint16_t titleCol = g_pal.ink;
+    switch (ui.state) {
+        case ST_CONNECTING: title = "Connecting...";      strlcpy(sub, "mqtt broker", sizeof(sub)); break;
+        case ST_OFFLINE:    title = "No link";            strlcpy(sub, "mqtt broker unreachable", sizeof(sub));
+                            titleCol = g_pal.inkSoft; break;
+        case ST_STALE:      title = "Usage not updating";
+                            strlcpy(sub, ui.note[0] ? ui.note : "check daemon", sizeof(sub)); break;
+        case ST_MAXED:      title = "Limit reached";      titleCol = g_pal.alert;
+                            snprintf(sub, sizeof(sub), "back in %s at %s",
+                                     ui.resetIn[0] ? ui.resetIn : "--", ui.resetAt[0] ? ui.resetAt : "?");
+                            break;
+        default:            title = "No active sessions";
+                            strlcpy(sub, "Claude Code sessions show up here", sizeof(sub)); break;
+    }
+    const int cy = ROW_Y0 + (240 - ROW_Y0) / 2;
+    gfx.setTextDatum(middle_center);
+    gfx.setFont(&fonts::FreeSansBold9pt7b);
+    gfx.setTextColor(titleCol, g_pal.bg);
+    gfx.drawString(title, 160, cy - 9);
+    gfx.setFont(&fonts::Font0);
+    gfx.setTextColor(g_pal.inkSoft, g_pal.bg);
+    gfx.drawString(sub, 160, cy + 12);
+    gfx.setTextDatum(top_left);
+}
+
 void agentsRender(lgfx::LovyanGFX& gfx, const UI& ui, bool linked, int top) {
     gfx.fillRect(0, 0, 320, 240, g_pal.bg);
-    drawHeader(gfx, ui, linked);
+    buddyDrawHeader(gfx, ui, linked);
 
-    bool blinkOn = (millis() / 500) % 2;
+    if (g_agentCount == 0) { drawEmpty(gfx, ui); return; }
+
+    int phase = (millis() / 500) % 4;
     for (int r = 0; r < AGENT_ROWS && top + r < g_agentCount; r++)
-        drawRow(gfx, g_agents[top + r], ROW_Y0 + r * ROW_H, blinkOn);
+        drawRow(gfx, g_agents[top + r], ROW_Y0 + r * ROW_H, phase);
 
     // Scroll indicator when the list is longer than the screen
     if (g_agentCount > AGENT_ROWS) {

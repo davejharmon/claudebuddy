@@ -101,6 +101,7 @@ void agentsOnMessage(const char* sessionId, const uint8_t* payload, unsigned len
     strlcpy(a.name, doc["name"] | "agent", sizeof(a.name));
     strlcpy(a.msg,  doc["msg"]  | "",      sizeof(a.msg));
     strlcpy(a.host, doc["host"] | "",      sizeof(a.host));
+    strlcpy(a.model, doc["model"] | "",    sizeof(a.model));
     a.ts    = doc["ts"] | (uint32_t)0;
     a.rxMs  = millis();
     a.state = st;

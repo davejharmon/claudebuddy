@@ -2,17 +2,18 @@
 
 A desk companion for Claude Code on an **M5Stack Core2**. Shows your Claude API token usage in real time — how much of your 5-hour and weekly windows you've burned, whether Claude is actively working, and how long until the next reset.
 
-![idle state](integration/assets/states/04-idle.png)
-![working state](integration/assets/states/03-working.png)
+The screen is a single board. A header shows your 5-hour and weekly usage as bars, plus the MQTT link and battery. Below it, each active Claude Code session gets a row with its state (see [Agent board](#4-agent-board-one-row-per-claude-code-session)).
 
 ## States
 
-| State | What it means | Brightness |
+With no sessions, the board shows one status line under the header:
+
+| State | What it shows | Brightness |
 |-------|---------------|-----------|
-| **READY** | Connected, Claude is idle | 120 |
-| **WORKING** | Tokens being spent | 255 |
-| **MAXED** | Rate limit hit — big countdown to reset | 190 |
-| **OFFLINE** | MQTT broker unreachable | 40 |
+| **READY** / **WORKING** | "No active sessions" | 120 / 255 |
+| **MAXED** | "Limit reached", back in X at Y | 190 |
+| **STALE** | "Usage not updating" (daemon silent for 5+ min); bars show `--` | 40 |
+| **CONNECTING** / **OFFLINE** | "Connecting..." / "No link" | 40 |
 
 The screen sleeps after 5 minutes of idle and wakes automatically when you start talking to Claude (via a Claude Code hook), or when usage resets.
 
@@ -104,7 +105,17 @@ Edit `hooks/wake.py` and set the correct MQTT broker IP, then add to `~/.claude/
 
 ### 4. Agent board (one row per Claude Code session)
 
-When any Claude Code session is active, the screen switches from the usage view to a list of agents: **NEEDS YOU** (amber, chimes and wakes the screen), **ERROR**, **WORKING**, then **DONE**. The header shows how many need you plus 5h/7d usage. The screen stays on while any agent is working or waiting on you, and sleeps 5 minutes after the last one finishes. With no agents it shows the usage view as before.
+When any Claude Code session is active, the board lists the agents, sorted **NEEDS YOU** (chimes and wakes the screen), **ERROR**, **WORKING**, then **DONE**. Each row has a small round state icon on the left, then the agent's name and, below it, its latest message, age, host and model (e.g. `your turn - now - DAVE-PC - opus 5.5`):
+
+| Icon | State |
+|------|-------|
+| amber circle, dark **!** (row also gets an amber border) | NEEDS YOU |
+| red circle, white **×** | ERROR |
+| coral circle, turning white spinner | WORKING |
+| grey outlined circle, three dots | QUIET (working, but silent for 30+ min) |
+| green circle, white tick | DONE |
+
+The header has two bars: **5h** usage on the left and **1w** (weekly) on the right, each with its %, turning red at 90%. Next to them is the link dot (coral = live, amber = connecting or usage stale, hollow = no MQTT link) and the battery at the far right. The bars show `--` when the usage reading is stale or the link is down. The screen stays on while any agent is working or waiting on you, and sleeps 5 minutes after the last one finishes. With no agents it shows the status line described under [States](#states).
 
 `hooks/agent_event.py` (standard library only, no `pip install`) publishes each session's state. Add it to `~/.claude/settings.json` in place of `wake.py`:
 
@@ -138,14 +149,16 @@ Rows age out: DONE after 30 min, ERROR after 1 h, a silent WORKING after 6 h (sh
 Topic: `claudebuddy/agents/<session_id>` (retained)
 
 ```json
-{"name": "Refactor auth", "state": "needs_you", "msg": "Claude needs your permission", "host": "dave-pc", "ts": 1763280000}
+{"name": "Refactor auth", "state": "needs_you", "msg": "Claude needs your permission", "host": "dave-pc", "model": "opus 5.5", "ts": 1763280000}
 ```
+
+`model` is the short name of the session's current model. The hook takes it from the event when present (`SessionStart`), otherwise from the newest assistant message in the session transcript, so `/model` switches show up on the next event.
 
 An empty retained payload removes the agent.
 
 ## UI design
 
-The visual reference and all design assets live in `integration/`. Open `integration/Claude Desk Buddy.html` in a browser to preview all four states. The pixel mascot is defined in `integration/assets/mascot.json` and is swappable.
+The original design reference (the mascot usage screen) lives in `integration/`, with `integration/Claude Desk Buddy.html` as a browser preview. The firmware no longer draws that screen, but still takes its palette from there.
 
 ## MQTT payload reference
 
