@@ -4,9 +4,10 @@
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 
-UI   g_ui;
-bool g_mqtt_connected = false;
-bool g_wake           = false;
+UI       g_ui;
+bool     g_mqtt_connected = false;
+bool     g_wake           = false;
+uint32_t g_last_msg_ms    = 0;
 
 static WiFiClient   wifiClient;
 static PubSubClient mqtt(wifiClient);
@@ -23,14 +24,20 @@ static void onMessage(char* topic, byte* payload, unsigned int len) {
     if      (strcmp(st, "working") == 0) g_ui.state = ST_WORKING;
     else if (strcmp(st, "maxed")   == 0) g_ui.state = ST_MAXED;
     else if (strcmp(st, "idle")    == 0) g_ui.state = ST_IDLE;
+    else if (strcmp(st, "stale")   == 0) g_ui.state = ST_STALE;
     else                                  g_ui.state = ST_OFFLINE;
 
     g_ui.h5 = doc["h5_pct"] | 0;
     g_ui.wk = doc["wk_pct"] | 0;
+    g_ui.ts = doc["ts"] | (uint32_t)0;
     strlcpy(g_ui.resetIn, doc["reset_in"] | "", sizeof(g_ui.resetIn));
     strlcpy(g_ui.resetAt, doc["reset_at"] | "", sizeof(g_ui.resetAt));
-    strlcpy(g_ui.note,    doc["note"]     | "", sizeof(g_ui.note));
+    if (g_ui.state == ST_STALE)
+        strlcpy(g_ui.note, doc["err"] | "daemon failing", sizeof(g_ui.note));
+    else
+        strlcpy(g_ui.note, doc["note"] | "", sizeof(g_ui.note));
     g_ui.fresh = true;
+    g_last_msg_ms = millis();
 
     Serial.printf("MQTT: %s  h5=%d%%  wk=%d%%\n", st, g_ui.h5, g_ui.wk);
 }
@@ -57,6 +64,7 @@ static void connectMqtt() {
 void mqttSetup() {
     WiFi.mode(WIFI_STA);
     connectWifi();
+    configTime(0, 0, "pool.ntp.org", "time.google.com");   // UTC; only used to age readings
     mqtt.setServer(MQTT_HOST, MQTT_PORT);
     mqtt.setCallback(onMessage);
     connectMqtt();

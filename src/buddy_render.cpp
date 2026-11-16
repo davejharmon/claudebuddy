@@ -80,8 +80,8 @@ static void drawMascot(lgfx::LovyanGFX& gfx, int x, int y, int scale, BuddyState
     applyCells(g, SHADE, sizeof(SHADE)/sizeof(Cell));
     if      (st == ST_WORKING)    applyCells(g, F_WORK,  sizeof(F_WORK)/sizeof(Cell));
     else if (st == ST_MAXED)      applyCells(g, F_MAXED, sizeof(F_MAXED)/sizeof(Cell));
-    else if (st == ST_OFFLINE ||
-             st == ST_CONNECTING) applyCells(g, F_OFF,   sizeof(F_OFF)/sizeof(Cell));
+    else if (st == ST_OFFLINE || st == ST_CONNECTING ||
+             st == ST_STALE)      applyCells(g, F_OFF,   sizeof(F_OFF)/sizeof(Cell));
     else                          applyCells(g, F_IDLE,  sizeof(F_IDLE)/sizeof(Cell));
 
     for (int r = 0; r < 16; r++)
@@ -100,7 +100,7 @@ static void drawMascot(lgfx::LovyanGFX& gfx, int x, int y, int scale, BuddyState
         gfx.fillTriangle(dx+2, dy, dx, dy+4, dx+4, dy+4, C_WHITE);
         gfx.fillCircle(dx+2, dy+5, 2, C_WHITE);
         gfx.drawCircle(dx+2, dy+5, 2, C_INK);
-    } else if (st == ST_OFFLINE || st == ST_CONNECTING) {
+    } else if (st == ST_OFFLINE || st == ST_CONNECTING || st == ST_STALE) {
         gfx.setFont(&fonts::Font0);
         gfx.setTextSize(1);
         gfx.setTextColor(C_INKSOFT, C_BG2);
@@ -149,7 +149,9 @@ static void drawBar(lgfx::LovyanGFX& gfx, const char* label, int y, int pct, boo
 
 // ── Full-screen render ────────────────────────────────────────────────────────
 void buddyRender(lgfx::LovyanGFX& gfx, const UI& ui) {
-    bool off        = (ui.state == ST_OFFLINE || ui.state == ST_CONNECTING);
+    // Stale counts as "off" so the bars show "--" rather than old numbers.
+    bool stale      = (ui.state == ST_STALE);
+    bool off        = (ui.state == ST_OFFLINE || ui.state == ST_CONNECTING || stale);
     bool connecting = (ui.state == ST_CONNECTING);
     uint16_t ink    = off ? C_INKSOFT : C_INK;
 
@@ -169,9 +171,9 @@ void buddyRender(lgfx::LovyanGFX& gfx, const UI& ui) {
     int  labelX   = hasBatt ? 290 : 304;
     gfx.setTextDatum(middle_right);
     gfx.setTextColor(C_INKSOFT, C_BG2);
-    const char* statusLabel = connecting ? "connecting..." : (off ? "no link" : "live");
+    const char* statusLabel = connecting ? "connecting..." : stale ? "stale" : (off ? "no link" : "live");
     gfx.drawString(statusLabel, labelX, 9);
-    if (connecting)      gfx.fillCircle(dotX, 9, 3, C_AMBER);
+    if (connecting || stale) gfx.fillCircle(dotX, 9, 3, C_AMBER);
     else if (off)        gfx.drawCircle(dotX, 9, 3, C_INKSOFT);
     else                 gfx.fillCircle(dotX, 9, 3, C_CORAL);
     if (hasBatt) drawBattery(gfx, 303, 5, ui.battery, ui.charging);
@@ -200,7 +202,8 @@ void buddyRender(lgfx::LovyanGFX& gfx, const UI& ui) {
     } else {
         const char* big = ui.state == ST_WORKING    ? "WORKING"
                         : ui.state == ST_OFFLINE     ? "OFFLINE"
-                        : ui.state == ST_CONNECTING  ? "OFFLINE" : "READY";
+                        : ui.state == ST_CONNECTING  ? "OFFLINE"
+                        : stale                      ? "STALE"   : "READY";
         gfx.setTextSize(2);
         gfx.setTextColor(ink, off ? C_BG2 : C_BG);
         gfx.drawString(big, sx, 74);
@@ -218,6 +221,11 @@ void buddyRender(lgfx::LovyanGFX& gfx, const UI& ui) {
             gfx.setTextColor(C_INKSOFT, C_BG2);
             gfx.drawString("connecting...", sx, 100);
             gfx.drawString("mqtt broker", sx, 114);
+        } else if (stale) {
+            gfx.setTextColor(C_INKSOFT, C_BG2);
+            gfx.drawString("usage not updating", sx, 100);
+            gfx.setTextColor(C_CLAY, C_BG);
+            gfx.drawString(ui.note[0] ? ui.note : "check daemon", sx, 114);
         } else {
             gfx.drawString("claude is idle", sx, 100);
             gfx.drawString("waiting...", sx, 114);
@@ -226,6 +234,6 @@ void buddyRender(lgfx::LovyanGFX& gfx, const UI& ui) {
 
     // Footer
     gfx.drawFastHLine(0, 178, 320, C_GHOST);
-    drawBar(gfx, "5H", 240 - 44, ui.h5, ui.h5 >= 90, off);
-    drawBar(gfx, "WK", 240 - 22, ui.wk, ui.wk >= 90, off);
+    drawBar(gfx, "5H", 240 - 44, ui.h5, !off && ui.h5 >= 90, off);
+    drawBar(gfx, "WK", 240 - 22, ui.wk, !off && ui.wk >= 90, off);
 }

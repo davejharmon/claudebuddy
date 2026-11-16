@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <M5Unified.h>
 #include <Preferences.h>
+#include <time.h>
 #include "buddy_render.h"
 #include "mqtt_handler.h"
 
@@ -16,6 +17,18 @@ static uint32_t   g_conn_lost_ms = 0;
 static uint32_t   g_batt_ms      = 0;
 #define CONNECTING_TIMEOUT_MS 30000UL
 #define BATT_INTERVAL_MS      30000UL
+// The daemon publishes every 60 s; anything older than this is not trusted.
+#define STALE_AFTER_S         300UL
+
+// True if the current reading is too old: nothing new for STALE_AFTER_S, or
+// (once NTP has synced) the daemon's own timestamp is that old, which catches
+// an old retained message delivered right after boot.
+static bool readingIsStale() {
+    if (millis() - g_last_msg_ms > STALE_AFTER_S * 1000UL) return true;
+    time_t now = time(nullptr);
+    if (g_ui.ts && now > 1700000000 && now - (time_t)g_ui.ts > (time_t)STALE_AFTER_S) return true;
+    return false;
+}
 
 static M5Canvas g_canvas(&M5.Display);
 
@@ -101,6 +114,17 @@ void loop() {
         bool became_working = (g_prev_state != ST_WORKING && g_ui.state == ST_WORKING);
         if (became_working) screenOn();            // wake immediately when Claude starts spending
         g_prev_state = g_ui.state;
+        if (g_screen_on) M5.Display.setBrightness(brightForState(g_ui.state));
+        redraw = true;
+    }
+
+    // Reading went stale while linked (daemon silent, or old retained payload)
+    if (g_mqtt_connected &&
+        (g_ui.state == ST_IDLE || g_ui.state == ST_WORKING || g_ui.state == ST_MAXED) &&
+        readingIsStale()) {
+        g_ui.state = ST_STALE;
+        strlcpy(g_ui.note, "no data from daemon", sizeof(g_ui.note));
+        g_prev_state = ST_STALE;
         if (g_screen_on) M5.Display.setBrightness(brightForState(g_ui.state));
         redraw = true;
     }

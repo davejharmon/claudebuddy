@@ -3,13 +3,18 @@
 claudebuddy daemon — polls Anthropic rate-limit headers, emits state-aware JSON to MQTT.
 
 Topic: claudebuddy/state   retain=True
-Payload: {"state":"working","h5_pct":58,"wk_pct":47,"reset_in":"1H 29M","reset_at":"3:00p","note":"+13pt this poll"}
+Payload: {"state":"working","h5_pct":58,"wk_pct":47,"reset_in":"1H 29M","reset_at":"3:00p","note":"+13pt this poll","ts":1763280000}
 
 States:
   maxed   — h5_pct >= 100 (or wk_pct >= 100)
   working — h5_pct increased since last poll (held for WORKING_HOLD_S after last rise)
   idle    — connected, not spending
+  stale   — polling keeps failing (e.g. expired login); "err" says why, no usage numbers
   (offline is decided by the device when MQTT drops — never published here)
+
+Every payload carries "ts" (Unix seconds) so the device can tell how old it is.
+Credentials are re-read from disk every poll, so logging in to Claude Code on
+this machine fixes an expired login without restarting the daemon.
 """
 
 import time, datetime, json, logging, sys
@@ -24,6 +29,8 @@ MQTT_PORT         = 1883
 MQTT_TOPIC        = "claudebuddy/state"
 POLL_INTERVAL_S   = 60
 WORKING_HOLD_S    = 180   # seconds to stay "working" after last utilisation rise
+STALE_AFTER_FAILS = 3     # consecutive failed polls before publishing "stale"
+MAX_BACKOFF_S     = 900   # longest wait between polls while failing
 TOKEN_REFRESH_URL = "https://platform.claude.com/v1/oauth/token"
 CLIENT_ID         = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 
@@ -33,6 +40,9 @@ logging.basicConfig(level=logging.INFO,
 log = logging.getLogger("claudebuddy")
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+class AuthError(RuntimeError):
+    """The stored login can't be used or refreshed; needs a fresh Claude Code login."""
+
 def parse_reset(value: str) -> tuple[int, int]:
     """Return (minutes_remaining, reset_unix_ts) from a reset header value.
     The header is a Unix epoch timestamp (seconds)."""
@@ -92,7 +102,9 @@ def refresh_token(creds: dict) -> dict:
         },
         timeout=15,
     )
-    resp.raise_for_status()
+    if resp.status_code != 200:
+        # OAuth error bodies are {"error": ..., "error_description": ...}; no secrets.
+        raise AuthError(f"token refresh failed ({resp.status_code}): {resp.text[:200]}")
     body = resp.json()
     if "error" in body:
         raise RuntimeError(f"token refresh failed: {body}")
@@ -131,7 +143,7 @@ def fetch_headers(creds: dict) -> dict:
         timeout=30,
     )
     if resp.status_code == 401:
-        raise RuntimeError("OAuth token rejected (401) — token may need manual refresh")
+        raise AuthError("OAuth token rejected (401) — log in to Claude Code on this machine")
     resp.raise_for_status()
     return resp.headers
 
@@ -146,13 +158,15 @@ def main():
     client.loop_start()
     log.info("MQTT connected to %s:%d", MQTT_HOST, MQTT_PORT)
 
-    creds = read_creds()
     prev_h5 = None
     last_rise_ts = 0.0
+    fails = 0
 
     while True:
         try:
-            creds = ensure_fresh_token(creds)
+            # Re-read every poll: Claude Code on this machine may have refreshed
+            # or replaced the login since last time.
+            creds = ensure_fresh_token(read_creds())
             hdrs = fetch_headers(creds)
 
             h5_pct  = round(float(hdrs.get("anthropic-ratelimit-unified-5h-utilization", "0")) * 100)
@@ -183,6 +197,7 @@ def main():
                 "state":  state,
                 "h5_pct": h5_pct,
                 "wk_pct": wk_pct,
+                "ts":     int(now),
             }
             if state == "maxed":
                 payload["reset_in"] = fmt_reset_in(h5_mins)
@@ -195,11 +210,23 @@ def main():
             msg = json.dumps(payload)
             client.publish(MQTT_TOPIC, msg, retain=True)
             log.info("→ %s", msg)
+            if fails:
+                log.info("recovered after %d failed polls", fails)
+            fails = 0
 
         except Exception as exc:
-            log.warning("poll error: %s", exc)
+            fails += 1
+            log.warning("poll error (%d in a row): %s", fails, exc)
+            if fails >= STALE_AFTER_FAILS:
+                # Replace the retained reading so the device stops showing old numbers.
+                err = "login expired" if isinstance(exc, AuthError) else "api error"
+                msg = json.dumps({"state": "stale", "err": err, "ts": int(time.time())})
+                client.publish(MQTT_TOPIC, msg, retain=True)
+                log.info("→ %s", msg)
+                prev_h5 = None
 
-        time.sleep(POLL_INTERVAL_S)
+        delay = POLL_INTERVAL_S if not fails else min(POLL_INTERVAL_S * 2 ** (fails - 1), MAX_BACKOFF_S)
+        time.sleep(delay)
 
 if __name__ == "__main__":
     main()
